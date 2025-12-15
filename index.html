@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Lesson Proofreader (Official Cloud Edition)</title>
+    <title>Smart Lesson Proofreader (Official Cloud Edition - Auto Sync)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -30,6 +30,16 @@
             content: '.'; animation: dots 1.5s steps(5, end) infinite;
         }
         @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 100% { content: ''; } }
+        /* Add a subtle animation for live sync indicator */
+        .pulse-dot {
+            height: 8px; width: 8px; background-color: #4ade80; border-radius: 50%; display: inline-block;
+            animation: pulse-green 2s infinite;
+        }
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800">
@@ -50,8 +60,13 @@
 
         // --- CONSTANTS ---
         // ဆရာပေးထားသော Official Gist URL (Data Source)
+        // Note: Using Raw URL is fine, but for frequent polling, we need to ensure no-cache
         const OFFICIAL_GIST_URL = "https://gist.githubusercontent.com/nayminthumbg-ops/0649a86f4ef973297ea6342b50ab9901/raw/myanmar_dict.json";
         
+        // Polling Interval in Milliseconds (e.g., 10 seconds)
+        // 10000 ms = 10 seconds
+        const SYNC_INTERVAL = 10000; 
+
         // Base fallback (used only if internet is down and no cache)
         const BASE_DICTIONARY = {
             "နိတ်": "နှိပ်", "နိပ်": "နှိပ်", "ခလေး": "ကလေး", "ကျတော်": "ကျွန်တော်", 
@@ -59,9 +74,6 @@
         };
 
         // Regex Suffix to prevent partial matches
-        // (1) Myanmar vowels/tones/medials (U+102B to U+103F)
-        // (2) Vowel E (U+1031), Visarga (U+1038)
-        // (3) Zero Width Space characters (U+200B, U+200C, U+200D)
         const MYANMAR_EXTENDED_CHECK = "(?![\\u102B-\\u103F\\u1031\\u1038\\u200B\\u200C\\u200D])";
 
         function App() {
@@ -82,7 +94,7 @@
             const [showApiSettings, setShowApiSettings] = useState(false);
             const [isAiLoading, setIsAiLoading] = useState(false);
             const [isGistLoading, setIsGistLoading] = useState(false);
-            const [gistStatus, setGistStatus] = useState("Checking..."); 
+            const [gistStatus, setGistStatus] = useState("Connecting..."); 
             
             const [aiResponse, setAiResponse] = useState(null);
             const [activeTab, setActiveTab] = useState('editor');
@@ -97,10 +109,19 @@
             useEffect(() => { localStorage.setItem('mm-github-token', githubToken); }, [githubToken]);
             useEffect(() => { localStorage.setItem('mm-proofreader-dict', JSON.stringify(customDict)); checkSpelling(text); }, [customDict]);
 
-            // Initial Load from Official Gist on startup
+            // --- AUTO SYNC LOGIC ---
             useEffect(() => {
-                loadFromGist(false); // Silent load
-            }, []);
+                // Initial Load
+                loadFromGist(false); 
+
+                // Setup Interval for Auto-Sync (Every 10 Seconds)
+                const intervalId = setInterval(() => {
+                    loadFromGist(false); // Silent sync
+                }, SYNC_INTERVAL);
+
+                // Cleanup on unmount
+                return () => clearInterval(intervalId);
+            }, [gistUrl]); // Re-run if URL changes
 
             useEffect(() => {
                 checkSpelling(text);
@@ -108,13 +129,13 @@
 
             // --- GIST HANDLER ---
             const loadFromGist = async (showMessages = true) => {
-                // Use the configured URL or default
                 const targetUrl = gistUrl || OFFICIAL_GIST_URL;
                 
-                setIsGistLoading(true);
+                // Only show spinner if explicitly requested (not for background polling)
+                if (showMessages) setIsGistLoading(true);
+                
                 try {
-                    // Fetch Raw Content Directly
-                    // Append timestamp to avoid caching issues on updates
+                    // Cache busting with timestamp to get fresh data
                     const noCacheUrl = `${targetUrl}?t=${new Date().getTime()}`;
                     
                     const response = await fetch(noCacheUrl);
@@ -122,23 +143,27 @@
                     
                     const dict = await response.json();
                     
-                    // Merge: Latest Cloud Dict overrides local
-                    setCustomDict(prev => ({...prev, ...dict}));
+                    // Update state - this will trigger re-render if data changed
+                    // React handles state diffing, so usually fine to set same object
+                    // We check if size changed to show a specific message maybe, but here simple is fine
+                    setCustomDict(prev => {
+                        // Simple check to see if new dict is different (size wise or first key)
+                        // Just merge for robustness
+                        return {...prev, ...dict};
+                    });
                     
-                    setGistStatus("Sync Active");
+                    setGistStatus("Live Synced");
                     if(showMessages) alert("Cloud မှ နောက်ဆုံးရ အချက်အလက်များကို ရယူပြီးပါပြီ။");
                 } catch (error) {
-                    console.error(error);
-                    setGistStatus("Offline Mode");
-                    if(showMessages) alert("အင်တာနက် အခက်အခဲကြောင့် Data မရယူနိုင်ပါ။ Local Data ကိုသာ အသုံးပြုနေပါသည်။");
+                    console.error("Sync Error:", error);
+                    setGistStatus("Sync Paused");
+                    if(showMessages) alert("Data မရယူနိုင်ပါ။ အင်တာနက် လိုင်းစစ်ဆေးပါ။");
                 } finally {
-                    setIsGistLoading(false);
+                    if (showMessages) setIsGistLoading(false);
                 }
             };
 
             const extractGistIdFromUrl = (url) => {
-                // Try to extract ID from typical raw or gist urls
-                // Format: .../username/GIST_ID/raw/... or .../gist.github.com/GIST_ID
                 const matches = url.match(/([a-f0-9]{32})/);
                 return matches ? matches[0] : null;
             };
@@ -155,7 +180,6 @@
 
                 setIsGistLoading(true);
                 try {
-                    // Update via GitHub API
                     const response = await fetch(`https://api.github.com/gists/${currentId}`, {
                         method: 'PATCH',
                         headers: {
@@ -189,14 +213,10 @@
                     setNewWrong("");
                     setNewRight("");
                     
-                    // If user has token (Admin), auto save to cloud
+                    // Admin: Auto Push to Cloud on Add
                     if (githubToken) {
-                        // Pass the new dict directly to save function to ensure sync
-                        // But since state updates are async, we use a small trick or just wait for effect
-                        // For simplicity in this UI, we trigger manual save logic here
                         const currentId = extractGistIdFromUrl(gistUrl);
                         if(currentId) {
-                             // Silent background update attempt
                              fetch(`https://api.github.com/gists/${currentId}`, {
                                 method: 'PATCH',
                                 headers: {
@@ -207,9 +227,16 @@
                                     files: { 'myanmar_dict.json': { content: JSON.stringify(updatedDict, null, 2) } }
                                 })
                             }).then(res => {
-                                if(res.ok) setGistStatus("Auto-Saved");
+                                if(res.ok) {
+                                    setGistStatus("Auto-Saved");
+                                    console.log("Auto-saved to cloud");
+                                }
                             }).catch(err => console.log("Auto-save failed", err));
                         }
+                    } else {
+                        // User: Local Only warning (optional) or just add locally until next sync overwrites it
+                        // Ideally, users shouldn't add words if they can't sync, 
+                        // but allowing local add is fine for temporary session.
                     }
                 }
             };
@@ -328,7 +355,11 @@
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => setShowApiSettings(!showApiSettings)} className={`p-2 rounded-lg transition flex items-center gap-2 ${showApiSettings ? 'bg-white text-blue-600' : 'bg-blue-600 hover:bg-blue-500'}`} title="Settings">
-                                    <IconSettings /> <span className="text-xs bg-white/20 px-2 py-0.5 rounded">{gistStatus}</span>
+                                    <IconSettings /> 
+                                    <div className="flex items-center gap-1.5 bg-white/20 px-2 py-0.5 rounded">
+                                        <span className={`pulse-dot ${gistStatus.includes("Error") || gistStatus.includes("Paused") ? "bg-red-400" : "bg-green-400"}`}></span>
+                                        <span className="text-xs">{gistStatus}</span>
+                                    </div>
                                 </button>
                                 <button onClick={() => {const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); alert("Copied!");}} className="flex items-center gap-2 bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition shadow-lg text-sm">
                                     <IconCopy /> Copy
@@ -364,7 +395,7 @@
                                 ) : (
                                     <div>
                                         <h3 className="font-bold mb-2 flex items-center gap-2"><IconCloud className="text-blue-400"/> Gist Database</h3>
-                                        <p className="text-sm text-slate-300 mb-4">ဤ URL မှ Data များကို အလိုအလျောက် ရယူနေပါသည်။</p>
+                                        <p className="text-sm text-slate-300 mb-4">ဤ URL မှ Data များကို အလိုအလျောက် (Auto Sync 10s) ရယူနေပါသည်။</p>
                                         
                                         <div className="mb-4">
                                             <label className="block text-xs text-slate-400 mb-1">Source URL (Default Official)</label>
