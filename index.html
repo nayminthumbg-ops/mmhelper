@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Lesson Proofreader (Updated Dictionary)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Markdown Parser for AI response -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .highlight-wrong { position: relative; cursor: pointer; }
+        .tooltip {
+            visibility: hidden; position: absolute; bottom: 100%; left: 50%;
+            transform: translateX(-50%); background-color: #1f2937; color: white;
+            padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap;
+            opacity: 0; transition: opacity 0.2s; z-index: 10; margin-bottom: 5px;
+        }
+        .highlight-wrong:hover .tooltip { visibility: visible; opacity: 1; }
+        .loading-dots:after {
+            content: '.'; animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 100% { content: ''; } }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Icons ---
+        const IconSparkles = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>;
+        const IconBookOpen = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>;
+        const IconCheck = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+        const IconCopy = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
+        const IconSettings = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.72l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>;
+
+        // --- EXPANDED DICTIONARY (Updated from MyLesson001.docx) ---
+        const BUILT_IN_DICTIONARY = {
+            // --- Common Colloquialisms & Typing Errors ---
+            "နိတ်": "နှိပ်", "နိပ်": "နှိပ်", "ခလေး": "ကလေး", "ကျတော်": "ကျွန်တော်", "ကျနော်": "ကျွန်တော်",
+            "ပီး": "ပြီး", "ပီးတော့": "ပြီးတော့", "နဲ": "နှင့်", "နဲ့": "နှင့်", 
+            "တခါ": "တစ်ခါ", "တခု": "တစ်ခု", "တယောက်": "တစ်ယောက်", "တမျိုး": "တစ်မျိုး",
+            "ရောက်ပီ": "ရောက်ပြီ", "ဖွင်": "ဖွင့်", "ပိတ်ပီး": "ပိတ်ပြီး", "ရိုက်ပီး": "ရိုက်ပြီး", "ပီးရင်": "ပြီးလျှင်",
+            "ဖစ်": "ဖြစ်", "ဖစ်နေ": "ဖြစ်နေ", "လုပ်မယ်": "လုပ်မည်", "သွားမယ်": "သွားမည်",
+            "ပါမယ်": "ပါမည်", "ပါတယ်": "ပါသည်", "ပါတယ": "ပါသည်", "ဒေ": "တွေ",
+            "တေ": "တွေ", "န့": "နှင့်", "လို": "လို့", "ဘဲ": "ပဲ", "မှားယွင်": "မှားယွင်း",
+            "စသည": "စသည်", "စြဖစ်": "ဖြစ်", "စပီး": "စပြီး", "မျာ": "များ",
+            "အမျိူး": "အမျိုး", "အနူန်း": "အနှုန်း", "အသုံးအနူန်း": "အသုံးအနှုန်း",
+            "ယုံ": "ရုံ", "နှိပ်လိုက်ယုံ": "နှိပ်လိုက်ရုံ",
+            
+            // --- From User's Book Analysis (Spelling corrections) ---
+            "ဥာဏ်ဏ": "ဉာဏ်", "လုံးလ": "လုံ့လ", "ဝိရီယ": "ဝီရိယ", "ပြတွင်းပေါက်": "ပြတင်းပေါက်",
+            "အတိုခေါက်": "အတိုကောက်", "အတို့ချူပ်": "အတိုချုပ်", "အတို့ခေါက်": "အတိုကောက်", "ချူပ်": "ချုပ်",
+            "ယခုချိန်": "ယခုအချိန်", "ကွားခြား": "ကွာခြား", "သက်မှတ်": "သတ်မှတ်", "တည့်ဆောက်": "တည်ဆောက်",
+            "တည့်ရှိ": "တည်ရှိ", "မူတည့်": "မူတည်", "နိုင်းယျဉ်": "နှိုင်းယှဉ်", "ရှပ်ထွေး": "ရှုပ်ထွေး",
+            "ရှပ်": "ရှုပ်", "မန်မိုရီ": "Memory", "ဗောက်(စ်)": "Box", "အပုံ": "ပုံ", "ပမဏ": "ပမာဏ",
+            "ကျတ်မှတ်": "ကျက်မှတ်", "ဖက်တဲ့အခါ": "ဖတ်တဲ့အခါ", "ဖက်": "ဖတ်", "စာဖက်": "စာဖတ်",
+            "အင်တာနတ်": "အင်တာနက်", "ဂျိုတု": "ဂြိုဟ်တု", "ဂိုဂဲ": "Google", "ဘလူးတူး": "Bluetooth",
+            "ဝတ်ဆိုဒ်": "Website", "ဝက်ဆိုက်": "Website", "ဆော့ကဒ်": "Shortcut", "အော်ရဂျင်နယ်": "Original",
+            "လော့": "Lock", "လောခက်": "Lock ခတ်",
+
+            // --- Computer Technical Terms (Myan/Eng) ---
+            "ကွန်ပူတာ": "ကွန်ပျူတာ", "ကွန်ပြူတာ": "ကွန်ပျူတာ", 
+            "မောက်": "မောက်စ် (Mouse)", "ကီးဘုတ်": "ကီးဘုတ် (Keyboard)",
+            "ဖိုင်": "ဖိုင် (File)", "ဖိုဒါ": "ဖိုဒါ (Folder)", "ဆော့ဝဲ": "ဆော့ဖ်ဝဲ (Software)",
+            "အင်တာနက်": "အင်တာနက် (Internet)", "ဝင်းဒိုး": "ဝင်းဒိုး (Windows)", "စကရင်": "စခရင် (Screen)",
+            "ဒီပီစီ": "This PC", "မိုင်ကွန်ပြူတာ": "My Computer", "ဘရောက်ဇာ": "Browser",
+            "ဒေါင်း": "ဒေါင်းလုပ် (Download)", "အကောင့်": "အကောင့် (Account)",
+            "ပရိုဂရမ်": "Program", "လင့်": "Link", "လက်တော့": "Laptop", "အော့ဖစ်": "Office",
+            "ပါဝါပွိုင့်": "PowerPoint", "အိပ်ဇဲ": "Excel", "နုတ်ပက်": "Notepad", "စတစ်": "Stick",
+            "ကလစ်": "Click", "ဂျီမေး": "Gmail",
+            
+            // --- English Capitalization & Typing ---
+            "save": "Save", "enter": "Enter", "click": "Click", 
+            "double click": "Double Click", "right click": "Right Click", "left click": "Left Click",
+            "wifi": "Wi-Fi", "usb": "USB", "pc": "PC", "monitor": "Monitor",
+            "google": "Google", "youtube": "YouTube", "facebook": "Facebook", "internet": "Internet",
+            "windows": "Windows", "microsoft": "Microsoft", "chrome": "Chrome", "firefox": "Firefox"
+        };
+
+        function App() {
+            const [text, setText] = useState("မင်္ဂလာပါ။ ခလေးတို့ရေ။\nပထမဆုံး This PC ကို နိတ်ဖွင့်ပါ။\nပီးရင် New Folder တည့်ဆောက်ပါ။");
+            const [mistakesFound, setMistakesFound] = useState([]);
+            
+            // Merge built-in + user custom dictionary
+            const [customDict, setCustomDict] = useState(() => {
+                const saved = localStorage.getItem('mm-proofreader-dict');
+                const userDict = saved ? JSON.parse(saved) : {};
+                return { ...BUILT_IN_DICTIONARY, ...userDict };
+            });
+
+            const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini-api-key') || "");
+            const [showApiSettings, setShowApiSettings] = useState(false);
+            const [isAiLoading, setIsAiLoading] = useState(false);
+            const [aiResponse, setAiResponse] = useState(null);
+            const [activeTab, setActiveTab] = useState('editor');
+            const [newWrong, setNewWrong] = useState("");
+            const [newRight, setNewRight] = useState("");
+
+            // Save API Key
+            useEffect(() => {
+                localStorage.setItem('gemini-api-key', apiKey);
+            }, [apiKey]);
+
+            // Save Custom Dict (User added ONLY, practically we save all merged here for simplicity in this demo)
+            useEffect(() => {
+                localStorage.setItem('mm-proofreader-dict', JSON.stringify(customDict));
+                checkSpelling(text);
+            }, [customDict]);
+
+            useEffect(() => {
+                checkSpelling(text);
+            }, [text]);
+
+            const checkSpelling = (inputText) => {
+                let foundMistakes = [];
+                Object.keys(customDict).forEach((wrongWord) => {
+                    if (inputText.includes(wrongWord)) {
+                        // Use regex to find all occurrences
+                        // We escape special regex chars in the wrongWord just in case
+                        const escapedWord = wrongWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(escapedWord, "g");
+                        let match;
+                        while ((match = regex.exec(inputText)) !== null) {
+                            foundMistakes.push({
+                                wrong: wrongWord,
+                                right: customDict[wrongWord],
+                                index: match.index,
+                            });
+                        }
+                    }
+                });
+                foundMistakes.sort((a, b) => a.index - b.index);
+                setMistakesFound(foundMistakes);
+            };
+
+            const applyCorrection = (wrong, right) => {
+                // Replace all occurrences of this specific wrong word
+                const escapedWord = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(escapedWord, "g");
+                const newText = text.replace(regex, right);
+                setText(newText);
+            };
+
+            const applyAllCorrections = () => {
+                let newText = text;
+                // We sort keys by length descending to replace longer phrases first (e.g., "right click" before "click")
+                const sortedKeys = Object.keys(customDict).sort((a, b) => b.length - a.length);
+                
+                sortedKeys.forEach((wrong) => {
+                    if (newText.includes(wrong)) {
+                        const right = customDict[wrong];
+                        const escapedWord = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(escapedWord, "g");
+                        newText = newText.replace(regex, right);
+                    }
+                });
+                setText(newText);
+            };
+
+            // --- AI FUNCTIONALITY ---
+            const callGeminiAI = async () => {
+                if (!apiKey) {
+                    alert("ကျေးဇူးပြု၍ Google API Key အရင်ထည့်သွင်းပေးပါ။");
+                    setShowApiSettings(true);
+                    return;
+                }
+
+                setIsAiLoading(true);
+                setAiResponse(null);
+
+                const prompt = `
+                You are a professional Myanmar Language Editor for computer lessons.
+                Task: Correct the spelling and grammar of the following Myanmar text.
+                
+                Specific Instructions:
+                1. Change colloquial words (e.g., "ကျတော်", "ပီး", "နဲ") to formal/written words (e.g., "ကျွန်တော်", "ပြီး", "နှင့်").
+                2. Fix English technical terms (capitalize correctly, e.g., "wifi" -> "Wi-Fi", "windows" -> "Windows").
+                3. Fix Myanmar spelling errors (e.g., "တည့်ဆောက်" -> "တည်ဆောက်", "ပမဏ" -> "ပမာဏ").
+                4. Keep the tone educational and encouraging.
+                5. Output ONLY the corrected text. Do not add explanations.
+
+                Original Text:
+                ${text}
+                `;
+
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    
+                    const data = await response.json();
+                    if (data.error) {
+                        throw new Error(data.error.message);
+                    }
+                    const correctedText = data.candidates[0].content.parts[0].text;
+                    setAiResponse(correctedText);
+                    setActiveTab('ai-result');
+                } catch (error) {
+                    alert("AI Error: " + error.message);
+                } finally {
+                    setIsAiLoading(false);
+                }
+            };
+
+            const acceptAiResult = () => {
+                setText(aiResponse);
+                setAiResponse(null);
+                setActiveTab('editor');
+            };
+
+            // --- UI HELPERS ---
+            const handleCopy = () => {
+                const tempTextArea = document.createElement("textarea");
+                tempTextArea.value = text;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand("copy");
+                document.body.removeChild(tempTextArea);
+                alert("စာသားများကို Copy ကူးယူပြီးပါပြီ။ Word တွင် Paste လုပ်နိုင်ပါပြီ။");
+            };
+
+            const renderHighlightedText = () => {
+                const wrongWords = Object.keys(customDict);
+                if (wrongWords.length === 0) return <p className="font-myanmar">{text}</p>;
+                
+                // Escape and Sort by length descending to match longest possible phrases first
+                const escapedWords = wrongWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+                escapedWords.sort((a, b) => b.length - a.length);
+                
+                const pattern = new RegExp(`(${escapedWords.join('|')})`, 'g');
+                const splitText = text.split(pattern);
+
+                return (
+                    <div className="whitespace-pre-wrap leading-relaxed text-gray-800 font-myanmar">
+                        {splitText.map((part, i) => {
+                            if (customDict.hasOwnProperty(part)) {
+                                return (
+                                    <span key={i} 
+                                        onClick={() => applyCorrection(part, customDict[part])}
+                                        className="highlight-wrong bg-red-100 text-red-600 border-b-2 border-red-400 font-bold px-1 rounded mx-0.5 hover:bg-red-200 transition-colors"
+                                    >
+                                        {part}
+                                        <span className="tooltip font-sans">ပြင်ရန်: {customDict[part]}</span>
+                                    </span>
+                                );
+                            }
+                            return <span key={i}>{part}</span>;
+                        })}
+                    </div>
+                );
+            };
+
+            const uniqueMistakes = [...new Set(mistakesFound.map(m => m.wrong))];
+
+            return (
+                <div className="font-sans text-slate-800 pb-20 bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-gradient-to-r from-blue-700 to-blue-500 text-white p-4 shadow-lg sticky top-0 z-50">
+                        <div className="max-w-6xl mx-auto flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                                    <IconBookOpen />
+                                </div>
+                                <div>
+                                    <h1 className="text-xl font-bold">Smart Lesson Proofreader</h1>
+                                    <p className="text-blue-100 text-xs hidden sm:block">Updated with Word File Data</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setShowApiSettings(!showApiSettings)}
+                                    className={`p-2 rounded-lg transition ${showApiSettings ? 'bg-white text-blue-600' : 'bg-blue-600 hover:bg-blue-500'}`}
+                                    title="AI Settings"
+                                >
+                                    <IconSettings />
+                                </button>
+                                <button 
+                                    onClick={handleCopy}
+                                    className="flex items-center gap-2 bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition shadow-lg text-sm"
+                                >
+                                    <IconCopy /> Copy Text
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* API Settings Panel */}
+                    {showApiSettings && (
+                        <div className="bg-slate-800 text-white p-6 shadow-inner animate-in slide-in-from-top-4">
+                            <div className="max-w-6xl mx-auto">
+                                <h3 className="font-bold mb-2 flex items-center gap-2">
+                                    <IconSparkles className="text-yellow-400"/> AI Setup (Google Gemini)
+                                </h3>
+                                <p className="text-sm text-slate-300 mb-4">
+                                    အလိုအလျောက် ပြင်ဆင်မှုစနစ် (AI) အသုံးပြုရန် Google API Key လိုအပ်ပါသည်။
+                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-blue-400 hover:underline ml-1">Get API Key Here</a>.
+                                </p>
+                                <div className="flex gap-2 max-w-xl">
+                                    <input 
+                                        type="password" 
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        placeholder="Paste your Gemini API Key here (starts with AIza...)"
+                                        className="flex-1 p-2 rounded text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <button onClick={() => setShowApiSettings(false)} className="bg-green-600 px-4 py-2 rounded text-sm font-bold hover:bg-green-500">
+                                        Save & Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <main className="max-w-6xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        
+                        {/* LEFT: Editor Area */}
+                        <div className="lg:col-span-2 flex flex-col gap-4">
+                            {/* Toolbar */}
+                            <div className="flex gap-2 bg-white p-2 rounded-xl shadow-sm border border-slate-200">
+                                <button 
+                                    onClick={() => setActiveTab('editor')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition ${activeTab === 'editor' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'}`}
+                                >
+                                    စာရိုက်ရန် (Editor)
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('preview')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition ${activeTab === 'preview' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'}`}
+                                >
+                                    အမှားကြည့်ရန် (Highlight)
+                                </button>
+                                {aiResponse && (
+                                    <button 
+                                        onClick={() => setActiveTab('ai-result')}
+                                        className={`px-4 py-2 rounded-lg text-sm font-bold transition bg-purple-100 text-purple-700`}
+                                    >
+                                        AI ရလဒ် ✨
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Main Input Area */}
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px] relative">
+                                {isAiLoading && (
+                                    <div className="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center backdrop-blur-sm">
+                                        <div className="text-4xl animate-bounce">🤖</div>
+                                        <p className="mt-4 text-blue-600 font-bold loading-dots">AI က စာများကို ဖတ်ရှု စစ်ဆေးနေပါသည်</p>
+                                    </div>
+                                )}
+
+                                {activeTab === 'editor' && (
+                                    <textarea
+                                        className="flex-1 w-full p-8 focus:outline-none resize-none text-lg leading-loose text-slate-800 font-myanmar"
+                                        placeholder="ဤနေရာတွင် သင်ခန်းစာများကို ရိုက်ထည့်ပါ (သို့မဟုတ်) Paste လုပ်ပါ..."
+                                        value={text}
+                                        onChange={(e) => setText(e.target.value)}
+                                        spellCheck={false}
+                                    />
+                                )}
+
+                                {activeTab === 'preview' && (
+                                    <div className="flex-1 w-full p-8 overflow-y-auto bg-slate-50 font-myanmar text-lg leading-loose">
+                                        {renderHighlightedText()}
+                                    </div>
+                                )}
+
+                                {activeTab === 'ai-result' && aiResponse && (
+                                    <div className="flex-1 flex flex-col">
+                                        <div className="bg-purple-50 p-3 text-purple-800 text-sm border-b border-purple-100 flex justify-between items-center">
+                                            <span>AI အကြံပြုချက်:</span>
+                                            <button onClick={acceptAiResult} className="bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700 text-xs font-bold">
+                                                လက်ခံမည် (Use This)
+                                            </button>
+                                        </div>
+                                        <div className="flex-1 p-8 overflow-y-auto bg-white text-lg leading-loose whitespace-pre-wrap font-myanmar">
+                                            {aiResponse}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* AI Action Button */}
+                            <button 
+                                onClick={callGeminiAI}
+                                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-4 rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 font-bold text-lg group"
+                            >
+                                <IconSparkles className="group-hover:animate-spin" /> 
+                                {apiKey ? "AI ဖြင့် အမှားများ အားလုံး ပြင်မည်" : "AI စနစ် စတင်ရန် (Setup AI)"}
+                            </button>
+                        </div>
+
+                        {/* RIGHT: Stats & Manual Tools */}
+                        <div className="flex flex-col gap-6">
+                            
+                            {/* Quick Stats Panel */}
+                            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                                <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-3">Detection Status</h3>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-myanmar">တွေ့ရှိသော အမှားများ:</span>
+                                    <span className={`font-bold ${uniqueMistakes.length > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                        {uniqueMistakes.length}
+                                    </span>
+                                </div>
+                                {uniqueMistakes.length > 0 && (
+                                    <button 
+                                        onClick={applyAllCorrections}
+                                        className="w-full mt-2 bg-red-50 text-red-600 py-2 rounded-lg text-sm font-bold hover:bg-red-100 transition border border-red-100"
+                                    >
+                                        အားလုံးပြင်မည် (Fix All)
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Mistake List */}
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 max-h-[500px]">
+                                <div className="bg-slate-50 p-3 border-b border-slate-200 font-bold text-sm text-slate-700 font-myanmar">
+                                    တွေ့ရှိထားသော စာလုံးများ
+                                </div>
+                                <div className="overflow-y-auto flex-1 p-2 space-y-2">
+                                    {uniqueMistakes.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-400">
+                                            <IconCheck />
+                                            <p className="text-xs mt-2 font-myanmar">အမှားမတွေ့ရှိပါ</p>
+                                        </div>
+                                    ) : (
+                                        uniqueMistakes.map((wrongWord, idx) => (
+                                            <div key={idx} className="bg-white p-3 rounded border border-slate-100 flex justify-between items-center shadow-sm hover:border-blue-300 transition-colors">
+                                                <div className="flex flex-col font-myanmar">
+                                                    <span className="text-red-500 line-through text-sm">{wrongWord}</span>
+                                                    <span className="text-green-600 font-bold text-sm">↳ {customDict[wrongWord]}</span>
+                                                </div>
+                                                <button 
+                                                    onClick={() => applyCorrection(wrongWord, customDict[wrongWord])}
+                                                    className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded font-bold hover:bg-blue-100 font-myanmar"
+                                                >
+                                                    ပြင်မည်
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                            
+                            {/* Manual Add Word */}
+                             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                                <h3 className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-3">Add Custom Word</h3>
+                                <div className="flex gap-2 mb-2">
+                                    <input 
+                                        className="w-1/2 p-2 border rounded text-sm font-myanmar" 
+                                        placeholder="အမှား (Wrong)"
+                                        value={newWrong}
+                                        onChange={(e) => setNewWrong(e.target.value)}
+                                    />
+                                    <input 
+                                        className="w-1/2 p-2 border rounded text-sm font-myanmar" 
+                                        placeholder="အမှန် (Right)"
+                                        value={newRight}
+                                        onChange={(e) => setNewRight(e.target.value)}
+                                    />
+                                </div>
+                                <button 
+                                    onClick={() => {
+                                        if(newWrong && newRight) {
+                                            setCustomDict(prev => ({...prev, [newWrong]: newRight}));
+                                            setNewWrong(""); setNewRight("");
+                                        }
+                                    }}
+                                    className="w-full bg-slate-800 text-white py-2 rounded text-sm font-bold hover:bg-slate-700"
+                                >
+                                    အသစ်ထည့်မည်
+                                </button>
+                            </div>
+
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
